@@ -62,7 +62,6 @@ fish_prep<-fish_prep %>% filter(!Knoll %in% knolls_to_remove) %>% filter(Site !=
 
 3. keep one observer from each knoll
 
-
 ```{r}
 one_observer<-list()
 loop<-1
@@ -96,31 +95,12 @@ knoll_site_year <-fish_prep %>% group_by(Site,year_month) %>% summarise("knoll_n
 
 4. keep only the resident fish
 
-* ill change the status of Pseudanthias squamipinnis to C here but i need to do it in the data prep script
-
-```{r}
-
-fish_prep$Status<-ifelse(fish_prep$Species %in% c("Pseudanthias squamipinnis",
-                                                  "Neopomacentrus miryae",
-                                                  "Chromis pembae",
-                                                  "Chromis weberi"),"C",fish_prep$Status)
-
-```
-
-
-
 ```{r}
 
 fish_prep <- fish_prep %>% filter(Status != "T")
 
 ```
 
-
-* here ill change mistakes in the confidance level of survey "Princess_6_2020-10-13" later i nedd to move it to the data prep script
-
-```{r}
-fish_prep$Confidence<-ifelse(fish_prep$survey_id == "Princess_6_2020-10-13" & fish_prep$Species != "Gobiodon reticulatus",0,fish_prep$Confidence)
-```
 
 5. convert year_month to factor
 
@@ -129,14 +109,13 @@ fish_prep$Confidence<-ifelse(fish_prep$survey_id == "Princess_6_2020-10-13" & fi
 fish_prep$year_month<-as.factor(fish_prep$year_month)
 ```
 
-
 6. create the data for species richness, abundance and shannon model
 
 General stepes:
 
 1. filter accourding to confidance level (richness and eveness; confidance = 0, abundance; confidance = 2)
 
-2. filter schools for eveness
+2. filter schooling fish for evenness calculations
 
 3. group by the right variable (number of species/ind/effective number)
 
@@ -166,7 +145,7 @@ abundance <- fish_prep %>%
            Surface_Area,Algae,coral_cover) %>%
     summarise("ind"=sum(Abundance))
 
-which(!abundance$survey_id %in% richness$survey_id)
+which(!abundance$survey_id %in% richness$survey_id) # need to be 0
 ```
 
 ### Shannon
@@ -192,7 +171,7 @@ shannon <- shannon %>%
 
 shannon<-spread(shannon,Species,aboundance,fill = 0)
 
-which(!abundance$survey_id %in% shannon$survey_id)
+which(!abundance$survey_id %in% shannon$survey_id) #need to be 1,transect "NR_4_2020-06-15" had only schooling fish
 ```
 calculate the shannon effective number
 
@@ -221,7 +200,7 @@ plot(richness_model)
 
 richness_model_gg = ggeffects::ggpredict(richness_model,terms = c('Surface_Area[1:66 by=1]','year_month'))
 
-tab_model(richness_model,file = "richness_model.xls")
+tab_model(richness_model,file = paste0(model_path,"\\richness_model.xls"))
 
 
 ggplot()+
@@ -258,7 +237,8 @@ ggplot()+
 ```{r}
 abundance_model<-lm(formula = log(ind) ~ log(Surface_Area)*year_month,data = abundance)
 summary(abundance_model)
-tab_model(abundance_model,file = "abundance_model.xls")
+
+tab_model(abundance_model,file = paste0(model_path,"\\abundance_model.xls"))
 
 plot(abundance_model)
 
@@ -301,7 +281,7 @@ ggplot()+
 shannon_model<-lm(formula = log(shannon_effective) ~ log(Surface_Area)*year_month,data = shannon)
 summary(shannon_model)
 
-tab_model(shannon_model,file = "shannon_model.xls")
+tab_model(shannon_model,file = paste0(model_path,"\\shannon_model.xls"))
 
 
 shannon_model_gg=ggeffects::ggpredict(shannon_model,terms = c('Surface_Area[1:66 by=1]','year_month'))
@@ -343,10 +323,10 @@ create wide data
 ```{r}
 richness_rarefied <- fish_prep %>% filter(Confidence < 1) %>% 
   group_by(Site,Year,year_month,Knoll,Surface_Area,Max_depth,Date,survey_id,Species) %>%
-  summarise("aboundance"=sum(Abundance))
+  summarise("abundance"=sum(Abundance))
 
 
-richness_rarefied<-spread(richness_rarefied,Species,aboundance,fill = 0)
+richness_rarefied<-spread(richness_rarefied,Species,abundance,fill = 0)
 ```
 
 
@@ -429,7 +409,7 @@ ggplot(data = ind_per_m,aes(x=year_month,y=mean_density,fill = year_month))+
 geom_bar(stat="identity")+geom_errorbar(aes(ymin=mean_density-se,ymax=mean_density+se),width =0.1)+
   geom_text(aes(label = n,y=1), size = 7,color= "white")+  
   xlab("Year")+ 
-  ylab(bquote('Mean fish density '(m^2)))+
+  ylab(bquote('Mean fish density '(Individuals/m^2)))+
   theme_classic()+
     theme(axis.text.x = element_text(size=20),
         plot.title = element_text(size=24),
