@@ -1,0 +1,336 @@
+---
+title: "5.1 knoll trajectories"
+author: "TG"
+date: "2023-07-01"
+output: html_document
+---
+
+
+```{r message=FALSE, warning=FALSE}
+
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(stringr)
+library(Hmisc)
+library(vegan)
+library(mobr)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(plotrix)
+library(forcats)
+
+
+color_op6_l <- c("#B66DAF","#7CE171","#20A39E","#23001E","#FFBA49","#EF5B5B")
+
+save_path_abundance<-"G:\\My Drive\\PHD\\chapter 1 strom effect\\R_storm_ms\\plots\\knoll trajectories\\abundance"
+save_path_richness<-"G:\\My Drive\\PHD\\chapter 1 strom effect\\R_storm_ms\\plots\\knoll trajectories\\richness"
+
+```
+
+
+In this script ill concentrate all the models and plot constructing Fig 2
+
+# Data prepartion
+
+```{r}
+load("fish_full_data.rdata")
+select <- dplyr::select
+
+fish_prep<-fish_full_data
+```
+
+## general steps:
+
+1. keep all years exept 2017
+
+```{r}
+
+fish_prep <- fish_full_data %>% filter(Year!=2017)
+
+```
+
+
+2. remove irregular sites
+
+```{r}
+knolls_to_remove<-c("South bridge reserve","North bridge reserve","south bridge reserve",
+                    "Tamar","north bridge reserve")
+
+fish_prep<-fish_prep %>% filter(!Knoll %in% knolls_to_remove) %>% filter(Site !="North beach")
+```
+
+
+3. keep one observer from each knoll
+
+
+```{r}
+one_observer<-list()
+loop<-1
+set.seed(1)
+
+for (i in unique(fish_prep$survey_id)) {
+  
+  data <- fish_prep %>% filter(survey_id == i)
+  
+  obs_amount <- length(unique(data$Observer))
+  obs_name <- unique(data$Observer)
+  chosen_obs <- sample(obs_name,1)  
+ 
+  filter_data<-data %>% filter(Observer == chosen_obs)
+  one_observer[[loop]]<-filter_data
+  loop<-loop+1
+  
+  
+}
+
+fish_prep <- bind_rows(one_observer)
+
+rm(data,filter_data,one_observer)
+
+# make sure i have the right knolls number
+
+
+knoll_site_year <-fish_prep %>% group_by(Site,year_month) %>% summarise("knoll_number"= n_distinct(knoll_id))
+
+```
+
+4. keep only the resident fish
+
+```{r}
+
+fish_prep <- fish_prep %>% filter(Status != "T")
+
+```
+
+
+5. convert year_month to factor
+
+```{r}
+
+fish_prep$year_month<-as.factor(fish_prep$year_month)
+```
+
+
+6. create the data for species richness, abundance and shannon model
+
+General stepes:
+1. add confisance to data before 2018
+
+2. filter accourding to confidance level (richness and eveness; confidance = 0, abundance; confidance = 2)
+
+3. filter schools for eveness
+
+4. group by the right variable (number of species/ind/effective number)
+
+
+```{r}
+#early years didnt have confidance 
+
+fish_prep$Confidence[is.na(fish_prep$Confidence)]<-(0)
+```
+
+
+### richness
+
+```{r}
+
+richness <- fish_prep %>% filter(Confidence < 1)
+
+richness<- richness %>%
+  group_by(survey_id) %>%
+  mutate(Species_number = n_distinct(Species_2015)) %>%
+  select(-Species,-Species_2015,-Family,-Abundance,-Length,-Confidence,-Status,-a,-b) %>%
+  ungroup() %>%
+  distinct(.keep_all = T)
+
+```
+
+
+
+### abundance
+
+```{r}
+abundance <- fish_prep %>%
+  group_by(survey_id,Site,Knoll,year_month,Max_depth,Min_depth,Mean_Complexity,
+           Surface_Area,Algae,coral_cover) %>%
+    summarise("ind"=sum(Abundance))
+
+which(!abundance$survey_id %in% richness$survey_id)
+```
+
+### Shannon
+
+first - filter and convert to wide data format
+
+chand to the school fish name that valid for 2015
+
+Pseudanthias squamipinnis == Pseudanthias spp.
+
+Atherinomorus lacunosus == Atherinidae
+
+Spratelloides gracilis == Spratelloididae
+
+```{r}
+
+school_species <- c("Chromis viridis",
+                    "Pseudanthias spp.",
+                    "Neopomacentrus miryae",
+                    "Atherinidae",
+                    "Spratelloididae") 
+
+shannon <- fish_prep %>% filter(! Species_2015 %in% school_species) %>% filter(Confidence < 1)
+
+
+shannon <- shannon %>%
+  group_by(Site,Year,year_month,Knoll,DD_X,DD_Y,Surface_Area,Max_depth,Date,survey_id,Species_2015) %>%
+  summarise("aboundance"=sum(Abundance))
+
+
+shannon<-spread(shannon,Species_2015,aboundance,fill = 0)
+
+which(!abundance$survey_id %in% shannon$survey_id) # need to be 1, transect "Caves_11_2020-06-14" had only schooling core species
+
+```
+calculate the shannon effective number
+
+```{r}
+shannon$shannon_div<-diversity(shannon[,11:ncol(shannon)],index="shannon")
+
+shannon<-shannon %>%
+  relocate(shannon_div,.after=survey_id) %>% 
+  mutate("shannon_effective"=exp(shannon_div),.after=shannon_div)
+  
+
+
+```
+
+# Abundance plot for each knoll
+
+```{r}
+
+
+for (i in unique(abundance$Site)) {
+  
+  
+p<-abundance %>% filter(Site == i) %>% 
+  mutate(Knoll = as.factor(Knoll)) %>% 
+  mutate(Knoll = fct_reorder(Knoll,ind,.fun='max')) %>%
+  ggplot( aes(x=fct_reorder(Knoll,ind,.fun='max'), y=ind, color = year_month)) + geom_point(size=2,position=position_jitter(width=0, height=0.4)) +
+  ggtitle(i)+
+  xlab("Knoll id") +
+  ylab("Resident fish abundance")+
+ theme_bw()+
+  theme(title = element_text(size = 20),
+       axis.text.x = element_text(size=20),
+        axis.text.y = element_text(size =16),
+        axis.title.x = element_text(size=22),
+        axis.title.y = element_text(size=22),
+        legend.title = element_text(size=22),
+        legend.text = element_text(size=20))+
+  scale_color_manual(values=color_op6_l,
+                           name = "Year",
+                           labels = c("Fall 2015","Fall 2016","Fall 2018","Spring 2020*", "Fall 2020" ,
+                                      "Spring 2021"))
+
+print(p)
+
+
+p_pdf<-paste0("fish_abundance_",i,".pdf")
+p_png<-paste0("fish_abundance_",i,".png")
+
+ggsave(p_pdf, width = 14, height =5, dpi = 300,path = save_path_abundance)
+ggsave(p_png, width = 14, height =5, dpi = 300,path = save_path_abundance)   
+}
+  
+
+
+
+```
+
+
+
+```{r}
+for (i in unique(richness$Site)) {
+  
+  
+p<-richness %>% filter(Site == i) %>% 
+  mutate(Knoll = as.factor(Knoll)) %>% 
+  mutate(Knoll = fct_reorder(Knoll,Species_number,.fun='max')) %>%
+  ggplot( aes(x=fct_reorder(Knoll,Species_number,.fun='max'), y=Species_number, color = year_month)) + geom_point(size=2,position=position_jitter(width=0, height=0.4)) +
+  ggtitle(i)+
+  xlab("Knoll id") +
+  ylab("Resident fish richness")+
+ theme_bw()+
+  theme(title = element_text(size = 20),
+       axis.text.x = element_text(size=20),
+        axis.text.y = element_text(size =16),
+        axis.title.x = element_text(size=22),
+        axis.title.y = element_text(size=22),
+        legend.title = element_text(size=22),
+        legend.text = element_text(size=20))+
+  scale_color_manual(values=color_op6_l,
+                           name = "Year",
+                           labels = c("Fall 2015","Fall 2016","Fall 2018","Spring 2020*", "Fall 2020" ,
+                                      "Spring 2021"))
+
+print(p)
+
+
+p_pdf<-paste0("fish_richness_",i,".pdf")
+p_png<-paste0("fish_richness_",i,".png")
+
+ggsave(p_pdf, width = 14, height =5, dpi = 300,path = save_path_richness)
+ggsave(p_png, width = 14, height =5, dpi = 300,path = save_path_richness)   
+}
+  
+
+```
+
+```{r}
+abundance %>% filter(Site =="NR") %>% 
+  mutate(Knoll = as.factor(Knoll)) %>% 
+  mutate(Knoll = fct_reorder(Knoll,ind,.fun='max')) %>%
+  ggplot( aes(x=fct_reorder(Knoll,ind,.fun='max'), y=ind, color = year_month)) + geom_point(size=2,position=position_jitter(width=0, height=0.4)) +
+  ggtitle("NR")+
+  xlab("Knoll id") +
+  ylab("Resident fish abumdance")+
+ theme_bw()+
+  theme(title = element_text(size = 20),
+       axis.text.x = element_text(size=20),
+        axis.text.y = element_text(size =16),
+        axis.title.x = element_text(size=22),
+        axis.title.y = element_text(size=22),
+        legend.title = element_text(size=22),
+        legend.text = element_text(size=20))+
+  scale_color_manual(values=color_op6_l,
+                           name = "Year",
+                           labels = c("Fall 2015","Fall 2016","Fall 2018","Spring 2020*", "Fall 2020" ,
+                                      "Spring 2021"))
+
+
+
+
+abundance %>% filter(Site =="NR") %>% 
+  ggplot( aes(x=year_month, y=ind, color = Knoll,group = Knoll)) + 
+  geom_point(size=2,position=position_jitter(width=0, height=0.4)) +
+  geom_path()+
+  ggtitle("NR")+
+  xlab("Knoll id") +
+  ylab("Resident fish abumdance")+
+ theme_bw()+
+  theme(title = element_text(size = 20),
+       axis.text.x = element_text(size=20),
+        axis.text.y = element_text(size =16),
+        axis.title.x = element_text(size=22),
+        axis.title.y = element_text(size=22),
+        legend.title = element_text(size=22),
+        legend.text = element_text(size=20))
+
++
+  scale_color_manual(values=color_op6_l)+
+   labs(color = "Year")
+```
+

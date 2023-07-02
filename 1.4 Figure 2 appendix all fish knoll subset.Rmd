@@ -220,7 +220,7 @@ ggplot()+
   theme_classic()+
   geom_line(data = richness_model_gg,aes(x= log(x),y = log(predicted),color= group),size=1.5)+ 
   geom_ribbon(data = richness_model_gg,aes(x=log(x),ymin=log(conf.low),ymax=log(conf.high),fill=group),alpha=0.2)+
-  ylab("Log(Richness)")+xlim(1,4)+ylim(-1,4)+
+  ylab("Log(Richness)")+xlim(1,4)+ylim(-1,5)+
   xlab(bquote('Log(Surface area '~(m^2)))+
     theme(axis.text.x = element_text(size=20),
         axis.text.y = element_text(size =20),
