@@ -1,0 +1,395 @@
+---
+title: "2.1 log ratio plots"
+author: "TG"
+date: "2023-06-27"
+output:
+   prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+
+
+```{r message=FALSE, warning=FALSE}
+
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(stringr)
+library(Hmisc)
+library(vegan)
+library(mobr)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(Rarefy)
+library(rareNMtests)
+library(zetadiv)
+library(FuzzyQ)
+library(SingleCaseES)
+
+```
+
+
+
+color scales definitions 
+
+```{r}
+color_op6 <- c("#20A39E","#23001E","#FFBA49","#EF5B5B")
+rank_filter <-51
+plot_path<-"G:\\My Drive\\PHD\\chapter 1 strom effect\\R_storm_ms\\plots\\Log raito"
+```
+
+
+# Data prepartion
+
+```{r}
+load("fish_full_data.rdata")
+select <- dplyr::select
+
+fish_prep<-fish_full_data
+```
+
+
+2. keep only data from 2018 
+```{r}
+
+fish_prep<- fish_prep %>% filter(Year > 2017)
+
+```
+
+
+
+3. remove irregular sites
+
+
+```{r}
+
+knolls_to_remove<-c("South bridge reserve","North bridge reserve","south bridge reserve",
+                    "Tamar","north bridge reserve")
+
+fish_prep<-fish_prep %>% filter(!Knoll %in% knolls_to_remove) %>% 
+  filter(Site !="North beach")
+
+```
+
+4. keep only sure identifications
+
+filter confidence = 0
+
+
+```{r}
+
+fish_prep<-fish_prep %>% filter(Confidence <1)
+
+```
+
+5. keep one observer from each knoll
+
+
+```{r}
+one_observer<-list()
+loop<-1
+set.seed(1)
+
+for (i in unique(fish_prep$survey_id)) {
+  
+  data <- fish_prep %>% filter(survey_id == i)
+  
+  obs_amount <- length(unique(data$Observer))
+  obs_name <- unique(data$Observer)
+  chosen_obs <- sample(obs_name,1)  
+  
+  filter_data<-data %>% filter(Observer == chosen_obs)
+  one_observer[[loop]]<-filter_data
+  loop<-loop+1
+  
+  
+}
+
+fish_prep <- bind_rows(one_observer)
+
+rm(data,filter_data,one_observer)
+
+# make sure i have the right knolls number
+
+
+knoll_site_year <-fish_prep %>% group_by(Site,year_month) %>% summarise("knoll_number"= n_distinct(knoll_id))
+
+```
+
+
+6. convert year_month to factor
+
+```{r}
+
+fish_prep$year_month<-as.factor(fish_prep$year_month)
+
+```
+
+
+
+7. keep only the knolls that were surveyed all  years
+
+(otherwise of coarse 2018 will have higher abundances...more knolls)
+
+```{r}
+
+knolls_2018<-fish_prep %>% filter(Year %in% c("2018")) %>% distinct(knoll_id)
+
+knolls_2020_a<-fish_prep %>% filter(year_month %in% c("2020 a")) %>% distinct(knoll_id)
+
+knolls_2020_b<-fish_prep %>% filter(year_month %in% c("2020 b")) %>% distinct(knoll_id)
+
+knolls_2021_a<-fish_prep %>% filter(year_month %in% c("2021 a")) %>% distinct(knoll_id)
+
+
+
+united_knolls <-Reduce(intersect,list(knolls_2018,knolls_2020_a,knolls_2020_b,knolls_2021_a))
+
+
+fish_prep<-fish_prep %>% filter(knoll_id %in% united_knolls$knoll_id)
+
+```
+
+7. use all fish 
+
+```{r}
+
+all_fish <- fish_prep 
+
+```
+
+## prepre rank data
+
+based on fuzzyQ of all fish from 2018 and on
+
+
+```{r}
+
+fuzzy_matrix <- all_fish %>% 
+  select(Site,year_month,Knoll,Species,Abundance) %>%
+  group_by(Site,year_month,Knoll,Species) %>% 
+  summarise(Abundance=sum(Abundance))
+
+fuzzy_matrix <- spread(fuzzy_matrix,
+                       Species,
+                       Abundance,
+                       fill = 0)
+
+fuzzy_matrix_species<-fuzzy_matrix[,4:ncol(fuzzy_matrix)]
+
+fuzzy <- fuzzyq(fuzzy_matrix_species)
+
+rank_data<-fuzzy[["spp"]]
+
+rank_data$Species<-rownames(rank_data)
+
+rownames(rank_data)<-NULL
+
+rank_data<-rank_data %>%
+  arrange(desc(Common.I)) %>%
+  mutate("rank"=1:nrow(rank_data)) %>% 
+  select(Species,rank,Common.I)
+
+
+family_data<-all_fish %>% select(Family,Species) %>% distinct(Species,.keep_all = T)
+
+rank_data<-left_join(rank_data,family_data)
+
+```
+
+
+recreate long data frame with all the species in all the knolls including 0 for species we didnt see
+
+```{r}
+
+ci_data<-fuzzy_matrix
+
+ci_data_all<-gather(ci_data,key = "Species",value = "Abundance",4:ncol(ci_data))
+
+```
+
+
+# log ratios
+
+## log ratio for 2018 vs strom data
+
+```{r}
+ci_data<-ci_data_all %>% arrange(Site,year_month,Knoll) %>% filter(year_month %in% c("2018 b","2020 a"))
+
+calc_species_se = batch_calc_ES(dat = ci_data, grouping =  Species, condition = year_month, outcome = Abundance,scale = "count", ES = "LRRi")
+```
+
+prepre 2018 vs strom data
+
+```{r}
+
+log_data <- all_fish %>%
+  filter(year_month %in% c("2018 b","2020 a")) %>% 
+  group_by(year_month,Family,Species) %>%
+  summarise(Abundance = sum(Abundance))
+
+log_data <- spread(log_data,year_month,Abundance)
+
+log_data <- left_join(rank_data,log_data)
+
+log_data <- left_join(log_data,calc_species_se)
+
+
+log_data <- log_data %>%
+  rename("before" = `2018 b`,"after"= `2020 a`)
+
+
+
+```
+
+### plot 2018 vs storm
+
+```{r}
+
+log_data$Species_rank<-paste0(log_data$Species," (",log_data$rank,")")
+
+log_data$Species <- reorder(log_data$Species, -log_data$Est)
+log_data$Species_rank <- reorder(log_data$Species_rank, -log_data$Est)
+
+log_data_short <- log_data %>% filter(rank < rank_filter)
+
+
+
+ggplot(data = log_data_short,aes(x=Est,y=Species_rank,fill = Family))+
+  geom_bar(stat="identity",color = "black")+
+  geom_errorbar(aes( xmin= CI_lower  , xmax= CI_upper),width = 0.5)+
+  theme_classic()+xlim(-5,5)+
+  theme(text = element_text(family = "serif"),
+        axis.text.x = element_text(size=24),
+        axis.text.y = element_text(size =26,face = "italic"),
+        axis.title.x = element_text(size=22),
+        axis.title.y = element_text(size=22),
+        legend.text = element_text(size =22,face = "italic"))+
+  ggtitle("spring 2020/ Fall 2018")
+
+#ggsave("log_ratio_storm_2018.pdf" , width = 15, height = 22, dpi = 300,path = plot_path)
+
+cor.test(log_data$Common.I,log_data$Est)
+
+
+```
+
+## log ratio for 2018 vs fall 2020 (PostS2)
+                
+```{r}
+ci_data_2<-ci_data_all %>% arrange(Site,year_month,Knoll) %>% filter(year_month %in% c("2018 b","2020 b"))
+
+calc_species_se_2 = batch_calc_ES(dat = ci_data_2, grouping =  Species, condition = year_month, outcome = Abundance,scale = "count", ES = "LRRi")
+
+```
+                
+    
+```{r}
+
+log_data_2 <- all_fish %>%
+  filter(year_month %in% c("2018 b","2020 b")) %>% 
+  group_by(year_month,Family,Species) %>%
+  summarise(Abundance = sum(Abundance))
+
+log_data_2 <- spread(log_data_2,year_month,Abundance)
+
+log_data_2 <- left_join(rank_data,log_data_2)
+log_data_2 <- left_join(log_data_2,calc_species_se_2)
+
+
+log_data_2 <- log_data_2 %>%
+  rename("before" = `2018 b`,"after"= `2020 b`) 
+
+
+```
+
+# plot
+
+```{r}
+
+log_data_2$Species <- reorder(log_data_2$Species, -log_data_2$Est)
+log_data_2$Species_rank <- reorder(log_data_2$Species_rank, -log_data_2$Est)
+
+log_data_short_2 <- log_data_2 %>% filter(rank < rank_filter)
+
+ggplot(data = log_data_short_2,aes(x=Est,y=Species_rank,fill = Family))+
+  geom_bar(stat="identity",color = "black")+
+  geom_errorbar(aes( xmin= CI_lower  , xmax= CI_upper),width = 0.5)+
+  theme_classic()+
+  scale_y_discrete(position = "right")+xlim(-5,5)+
+  theme(text = element_text(family = "serif"),
+        axis.text.x = element_text(size=24),
+        axis.text.y = element_text(size =26,face = "italic"),
+        axis.title.x = element_text(size=22),
+        axis.title.y = element_text(size=22))+
+  ggtitle("Fall 2020/ Fall 2018")
+
+
+#ggsave("log_ratio_F18_F20.pdf" , width = 15, height = 22, dpi = 300,path =plot_path)
+
+cor.test(log_data_2$Common.I,log_data_2$Est)
+
+```
+
+### log ratios for 2020 spring (posts1) to 2021 spring (posts3)
+                                                
+         
+                                                
+```{r}
+ci_data_3<-ci_data_all %>% arrange(Site,year_month,Knoll) %>% filter(year_month %in% c("2020 a","2021 a"))
+
+calc_species_se_3 = batch_calc_ES(dat = ci_data_3, grouping =  Species, condition = year_month, outcome = Abundance,scale = "count", ES = "LRRi")
+```
+                                                
+                                                
+                                                
+```{r}
+log_data_3 <- all_fish %>%
+  filter(year_month %in% c("2020 a","2021 a")) %>% 
+  group_by(year_month,Family,Species) %>%
+  summarise(Abundance = sum(Abundance))
+
+log_data_3 <- spread(log_data_3,year_month,Abundance)
+
+log_data_3 <- left_join(rank_data,log_data_3)
+log_data_3 <- left_join(log_data_3,calc_species_se_3)
+log_data_3 <- log_data_3 %>%
+  rename("storm" = `2020 a`,"after"= `2021 a`) %>%
+  mutate(ratio = after/storm, log_ratio = log(ratio))
+
+
+
+```
+                                                
+                                                
+# plot
+                                                
+```{r}
+
+
+log_data_3$Species_rank<-paste0(log_data_3$Species," (",log_data_3$rank,")")
+
+log_data_3$Species <- reorder(log_data_3$Species, -log_data_3$Est)
+log_data_3$Species_rank <- reorder(log_data_3$Species_rank, -log_data_3$Est)
+
+log_data_short_3 <- log_data_3 %>% filter(rank < rank_filter)
+
+ggplot(data = log_data_short_3,aes(x=Est,y=Species_rank,fill = Family))+
+  geom_bar(stat="identity",color = "black")+
+  geom_errorbar(aes( xmin= CI_lower  , xmax= CI_upper),width = 0.5)+
+  theme_classic()+xlim(-5,5)+
+  theme(text = element_text(family = "serif"),
+        axis.text.x = element_text(size=24),
+        axis.text.y = element_text(size =26,face = "italic"),
+        axis.title.x = element_text(size=22),
+        axis.title.y = element_text(size=22))+
+  ggtitle("Spring 2020/ Spring 2021")
+
+
+#ggsave("log_ratio_S20_S21.pdf" , width = 15, height = 22, dpi = 300,path =plot_path)
+
+cor.test(log_data_3$Common.I,log_data_3$Est)
+
+```
