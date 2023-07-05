@@ -1,13 +1,12 @@
 ---
-title: "2.1 log ratio plots"
+title: "2.2 log ratio with traits"
 author: "TG"
-date: "2023-06-27"
+date: "2023-07-02"
 output:
    prettydoc::html_pretty:
     theme: cayman
     highlight: github
 ---
-
 
 ```{r message=FALSE, warning=FALSE}
 
@@ -48,6 +47,56 @@ load("fish_full_data.rdata")
 select <- dplyr::select
 
 fish_prep<-fish_full_data
+```
+
+
+# trait prepartion
+
+Ive got 2 files sources:
+
+1. avery table:
+
+```{r}
+traits_avery<-read.csv("traits data/traits_for_tal.csv")
+
+my_species<-fish_full_data %>% distinct(Species)
+
+traits_avery<-traits_avery %>% rename("Species"="species_fishbase_name")
+
+my_species<-left_join(my_species,traits_avery)
+
+trait_matrix<-my_species %>% select(Species,order,family,genus,
+                                    home_range,activity,schooling,diet,water_level)
+
+```
+
+2. lab file
+
+```{r}
+
+Final_traits<-read.csv("traits data/Final_traits.csv")
+
+Final_traits$Name<-str_to_sentence(Final_traits$Name)
+size_traits<-Final_traits %>% select(Name,Size.FishBase,Size_type,Size.Class)
+size_traits<-size_traits %>% rename("Species"="Name")
+
+trait_matrix<-left_join(trait_matrix,size_traits)
+
+trait_matrix %>%
+  summarise_all(funs(sum(is.na(.))))
+
+#trait_matrix$home_range<-ordered(trait_matrix$home_range,c("Sed","Mob","VMob"))
+#trait_matrix$schooling<-ordered(trait_matrix$schooling,c("Sol","Pair","SmallG","MedG","LargeG"))
+#trait_matrix$water_level<-ordered(trait_matrix$water_level,c("Bottom","Low","High"))
+trait_matrix$Size.Class<-ordered(trait_matrix$Size.Class,c("S1","S2","S3","S4","S5","S6"))
+
+trait_matrix$activity<-as.factor(trait_matrix$activity)
+trait_matrix$diet<-as.factor(trait_matrix$diet)
+trait_matrix$home_range<-as.factor(trait_matrix$home_range)
+trait_matrix$water_level<-as.factor(trait_matrix$water_level)
+trait_matrix$schooling<-as.factor(trait_matrix$schooling)
+#save(trait_matrix,file ="ecocamp_trait_matrix.RData")
+
 ```
 
 
@@ -160,6 +209,7 @@ all_fish <- fish_prep
 
 ```
 
+
 ## prepre rank data
 
 based on fuzzyQ of all fish from 2018 and on
@@ -214,12 +264,13 @@ ci_data_all<-gather(ci_data,key = "Species",value = "Abundance",4:ncol(ci_data))
 clean the environment
 
 ```{r}
-rm(list=ls()[! ls() %in% c("ci_data_all","ci_data","all_fish","fish_full_data","rank_data")])
+rm(list=ls()[! ls() %in% c("ci_data_all","ci_data","all_fish","fish_full_data","rank_data","trait_matrix")])
 
 
 color_op6 <- c("#20A39E","#23001E","#FFBA49","#EF5B5B")
 rank_filter <-51
 plot_path<-"G:\\My Drive\\PHD\\chapter 1 strom effect\\R_storm_ms\\plots\\Log raito"
+trait_path<-"G:\\My Drive\\PHD\\chapter 1 strom effect\\R_storm_ms\\plots\\traits"
 ```
 
 
@@ -289,6 +340,55 @@ cor.test(log_data$Common.I,log_data$Est)
 
 ```
 
+### trait analyses
+
+```{r}
+
+trait_1<-left_join(log_data,trait_matrix)
+
+trait_1<-trait_1 %>% drop_na(16:23)
+  
+filter_trait_1<-trait_1 %>% filter(rank<101)
+
+hist(filter_trait_1$Est)
+
+m1<-lmer(Est ~ diet+ Size.FishBase + water_level + home_range +schooling+ rank+ (1|Family),data =filter_trait_1,na.action = "na.fail")
+
+m2<-lmer(Est ~ (diet+ Size.FishBase + water_level + home_range +schooling)^2+ (1|Family),data =filter_trait_1,na.action = "na.fail")
+
+dredge_table<-dredge(global.model = m1)
+#dredge_table_interactions <-dredge(global.model = m2)
+
+
+fm1<-lmer(Est ~Size.FishBase + water_level+ (1|Family),data =filter_trait_1,na.action = "na.fail")
+summary(fm1)
+plot(fm1)
+fm1_model_gg = ggeffects::ggpredict(fm1,terms = c('Size.FishBase[1:80 by=5]'))
+
+colnames(fm1_model_gg)<-c("Size.FishBase","Est","std.error","conf.low","conf.high","group")
+
+ggplot()+
+  theme_classic()+
+  geom_line(data = fm1_model_gg,aes(x= Size.FishBase,y = Est),size=1)+ 
+  geom_ribbon(data = fm1_model_gg,aes(x=Size.FishBase,ymin=conf.low,ymax=conf.high),alpha=0.1)+
+  geom_point(data = filter_trait_1,aes(x=Size.FishBase,y= Est,color = Family),size = 2)+
+  ylab("Log ratio")+
+  xlab("Fish size (cm)")+
+    theme(axis.text.x = element_text(size=20),
+        axis.text.y = element_text(size =20),
+        axis.title.x = element_text(size=22),
+        axis.title.y = element_text(size=22),
+        legend.title = element_text(size=22),
+        legend.text = element_text(size=20),
+        strip.text.x = element_text(size = 20))
+
+
+ggsave("posts1_pres1_model.png" , width = 12, height = 5, dpi = 300,path = trait_path)
+ggsave("posts1_pres1_model.pdf" , width = 12, height = 5, dpi = 300,path = trait_path)
+```
+
+
+
 ## log ratio for 2018 vs fall 2020 (PostS2)
                 
 ```{r}
@@ -324,7 +424,7 @@ log_data_2 <- log_data_2 %>%
 
 log_data_2$Species <- reorder(log_data_2$Species, -log_data_2$Est)
 log_data_2$Species_rank<-paste0(log_data_2$Species," (",log_data_2$rank,")")
-log_data_2$Species_rank <- reorder(log_data_2$Species_rank,-log_data_2$Est)
+log_data_2$Species_rank <- reorder(log_data_2$Species_rank, -log_data_2$Est)
 
 log_data_short_2 <- log_data_2 %>% filter(rank < rank_filter)
 
@@ -344,6 +444,28 @@ ggplot(data = log_data_short_2,aes(x=Est,y=Species_rank,fill = Family))+
 #ggsave("log_ratio_F18_F20.pdf" , width = 15, height = 22, dpi = 300,path =plot_path)
 
 cor.test(log_data_2$Common.I,log_data_2$Est)
+
+```
+
+
+
+
+```{r}
+trait_2<-left_join(log_data_2,trait_matrix)
+
+trait_2<-trait_2 %>% drop_na(16:23)
+  
+filter_trait_2<-trait_2 %>% filter(rank<101)
+
+hist(filter_trait_2$Est)
+
+m2.1<-lmer(Est ~ diet+ Size.FishBase + water_level + home_range +schooling+ rank+ (1|Family),data =filter_trait_2,na.action = "na.fail")
+
+m2.2<-lmer(Est ~ (diet+ Size.FishBase + water_level + home_range +schooling)^2+ (1|Family),data =filter_trait_2,na.action = "na.fail")
+
+dredge_table_2<-dredge(global.model = m2.1)
+#dredge_table_interactions_2 <-dredge(global.model = m2.2)
+
 
 ```
 
@@ -407,3 +529,39 @@ ggplot(data = log_data_short_3,aes(x=Est,y=Species_rank,fill = Family))+
 cor.test(log_data_3$Common.I,log_data_3$Est)
 
 ```
+
+
+
+```{r}
+trait_3<-left_join(log_data_3,trait_matrix)
+
+trait_3<-trait_3 %>% drop_na(16:23)
+  
+filter_trait_3<-trait_3 %>% filter(rank<101)
+
+hist(filter_trait_3$Est)
+
+m3_1<-lmer(Est ~ diet+ Size.FishBase + water_level + home_range +schooling+rank+ (1|Family),data =filter_trait_3,na.action = "na.fail")
+
+m3_2<-lmer(Est ~ (diet+ Size.FishBase + water_level + home_range +schooling)^2+ (1|Family),data =filter_trait_3,na.action = "na.fail")
+
+dredge_table_3<-dredge(global.model = m3_1)
+#dredge_table_interactions_3 <-dredge(global.model = m3_2)
+
+
+######
+
+
+
+
+fm3<-lmer(Est ~ water_level + home_range+ (1|Family),data =filter_trait_3,na.action = "na.fail")
+summary(fm3)
+plot(fm3)
+
+#fm1_model_gg = ggeffects::ggpredict(fm1,terms = c('Size.FishBase[1:80 by=5]'))
+
+
+
+
+```
+

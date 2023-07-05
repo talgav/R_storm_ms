@@ -149,6 +149,25 @@ richness<- richness %>%
 ```
 
 
+```{r}
+
+richness_bg<-richness %>% filter(Year <2020)
+richness_aov<-aov(Species_number ~ knoll_id,data = richness_bg)
+summary(richness_aov)
+
+
+a<-richness_aov[["coefficients"]]
+var(richness_aov[["coefficients"]])
+var(richness_aov[["residuals"]])
+
+lmer(Species_number ~ Site+(1|knoll_id),data = richness_bg)
+
+
+#ggplot(data = richness_bg,aes(x=fct_reorder(Knoll,Species_number,.fun='max'),y=Species_number))+geom_boxplot()+facet_wrap(~Site)
+```
+
+
+
 
 ### abundance
 
