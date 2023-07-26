@@ -157,8 +157,8 @@ summary(richness_aov)
 
 
 a<-richness_aov[["coefficients"]]
-var(richness_aov[["coefficients"]])
-var(richness_aov[["residuals"]])
+mean(richness_aov[["coefficients"]])
+mean(richness_aov[["residuals"]])
 
 lmer(Species_number ~ Site+(1|knoll_id),data = richness_bg)
 
@@ -173,11 +173,40 @@ lmer(Species_number ~ Site+(1|knoll_id),data = richness_bg)
 
 ```{r}
 abundance <- fish_prep %>%
-  group_by(survey_id,Site,Knoll,year_month,Max_depth,Min_depth,Mean_Complexity,
+  group_by(survey_id,Site,knoll_id,Year,year_month,Max_depth,Min_depth,Mean_Complexity,
            Surface_Area,Algae,coral_cover) %>%
     summarise("ind"=sum(Abundance))
 
 which(!abundance$survey_id %in% richness$survey_id)
+
+
+abundance_bg<-abundance %>% filter(Year <2020)
+abundance_aov<-aov(ind ~ knoll_id,data = abundance_bg)
+
+summary(abundance_aov)
+
+
+
+
+school_species <- c("Chromis viridis",
+                    "Pseudanthias spp.",
+                    "Neopomacentrus miryae",
+                    "Atherinidae",
+                    "Spratelloididae") 
+
+abundance_ns <- fish_prep %>% filter(!Species %in% school_species) %>% 
+  group_by(survey_id,Site,knoll_id,Year,year_month,Max_depth,Min_depth,Mean_Complexity,
+           Surface_Area,Algae,coral_cover) %>%
+    summarise("ind"=sum(Abundance))
+
+which(!abundance_ns$survey_id %in% richness$survey_id)
+
+
+abundance_bg_ns<-abundance_ns %>% filter(Year <2020)
+abundance_aov_ns<-aov(ind ~ knoll_id,data = abundance_bg_ns)
+
+summary(abundance_aov_ns)
+
 ```
 
 ### Shannon

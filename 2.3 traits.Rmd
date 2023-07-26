@@ -1,12 +1,13 @@
 ---
-title: "2.2 log ratio with traits"
+title: "2.3 traits"
 author: "TG"
-date: "2023-07-02"
+date: "2023-07-18"
 output:
    prettydoc::html_pretty:
     theme: cayman
     highlight: github
 ---
+
 
 ```{r message=FALSE, warning=FALSE}
 
@@ -31,20 +32,16 @@ library(sjPlot)
 ```
 
 
-
-color scales definitions 
-
-```{r}
-color_op6 <- c("#20A39E","#23001E","#FFBA49","#EF5B5B")
-rank_filter <-51
-plot_path<-"G:\\My Drive\\PHD\\chapter 1 strom effect\\R_storm_ms\\plots\\Log raito"
-```
-
-
 # Data prepartion
 
 ```{r}
-load("fish_full_data.rdata")
+load("fish_full_data.rdata") # fish data
+
+# traits data
+
+traits_avery<-read.csv("traits data/traits_for_tal.csv")
+Final_traits<-read.csv("traits data/Final_traits.csv")
+
 select <- dplyr::select
 
 fish_prep<-fish_full_data
@@ -58,7 +55,7 @@ Ive got 2 files sources:
 1. avery table:
 
 ```{r}
-traits_avery<-read.csv("traits data/traits_for_tal.csv")
+
 
 my_species<-fish_full_data %>% distinct(Species)
 
@@ -75,7 +72,7 @@ trait_matrix<-my_species %>% select(Species,order,family,genus,
 
 ```{r}
 
-Final_traits<-read.csv("traits data/Final_traits.csv")
+
 
 Final_traits$Name<-str_to_sentence(Final_traits$Name)
 size_traits<-Final_traits %>% select(Name,Size.FishBase,Size_type,Size.Class)
@@ -83,19 +80,16 @@ size_traits<-size_traits %>% rename("Species"="Name")
 
 trait_matrix<-left_join(trait_matrix,size_traits)
 
-trait_matrix %>%
-  summarise_all(funs(sum(is.na(.))))
+trait_matrix %>% summarise_all(funs(sum(is.na(.))))
 
-#trait_matrix$home_range<-ordered(trait_matrix$home_range,c("Sed","Mob","VMob"))
-#trait_matrix$schooling<-ordered(trait_matrix$schooling,c("Sol","Pair","SmallG","MedG","LargeG"))
-#trait_matrix$water_level<-ordered(trait_matrix$water_level,c("Bottom","Low","High"))
 trait_matrix$Size.Class<-ordered(trait_matrix$Size.Class,c("S1","S2","S3","S4","S5","S6"))
-
 trait_matrix$activity<-as.factor(trait_matrix$activity)
 trait_matrix$diet<-as.factor(trait_matrix$diet)
 trait_matrix$home_range<-as.factor(trait_matrix$home_range)
 trait_matrix$water_level<-as.factor(trait_matrix$water_level)
 trait_matrix$schooling<-as.factor(trait_matrix$schooling)
+
+
 #save(trait_matrix,file ="ecocamp_trait_matrix.RData")
 
 ```
@@ -265,7 +259,7 @@ ci_data_all<-gather(ci_data,key = "Species",value = "Abundance",4:ncol(ci_data))
 clean the environment
 
 ```{r}
-rm(list=ls()[! ls() %in% c("ci_data_all","ci_data","all_fish","fish_full_data","rank_data","trait_matrix")])
+rm(list=ls()[! ls() %in% c("ci_data_all","all_fish","fish_full_data","rank_data","trait_matrix")])
 
 
 color_op6 <- c("#20A39E","#23001E","#FFBA49","#EF5B5B")
@@ -307,12 +301,17 @@ log_data <- log_data %>%
   rename("before" = `2018 b`,"after"= `2020 a`)
 
 
+rm(ci_data)
+rm(calc_species_se)
+
 
 ```
 
 
 
 ### trait analyses
+
+
 
 ```{r}
 
@@ -329,40 +328,130 @@ filter_trait_1$Status<-as.factor(filter_trait_1$Status)
 filter_trait_1$Status[filter_trait_1$Species == "Parupeneus cyclostomus"]<-"T"
 
 m1<-lmer(Est ~ diet+ Size.FishBase + water_level+schooling+rank+activity+ Status+(1|Family),data =filter_trait_1,na.action = "na.fail")
-
-m2<-lmer(Est ~ (diet+ Size.FishBase + water_level + rank+Status+activity+schooling)^2+ (1|Family),data =filter_trait_1,na.action = "na.fail")
+car::vif(m1)
 
 dredge_table<-dredge(global.model = m1)
 
 #write.csv(dredge_table,paste0(model_path,"\\traits_1_derdge_raw.csv"))
 
-#dredge_table_interactions <-dredge(global.model = m2)
-#car::vif(m1)
+# best model:
+
+dredge_table<-dredge_table[1:10,]
 
 fm1<-lmer(Est ~Size.FishBase + water_level+ (1|Family),data =filter_trait_1,na.action = "na.fail")
+
 summary(fm1)
 plot(fm1)
 
+
+```
+
+```{r}
+r1_list<-list()
+
+#1
+
+fm1<-lmer(Est ~Size.FishBase + (1|Family),data =filter_trait_1,na.action = "na.fail")
+
+summary(fm1)
+
+r1_list[[1]]<-as.data.frame(r.squaredGLMM(fm1))
+
+#2
+
+fm2<-lmer(Est ~Size.FishBase + water_level+ (1|Family),data =filter_trait_1,na.action = "na.fail")
+
+summary(fm2)
+
+r1_list[[2]]<-as.data.frame(r.squaredGLMM(fm2))
+
+#3
+
+fm3<-lmer(Est ~ + (1|Family),data =filter_trait_1,na.action = "na.fail")
+
+summary(fm3)
+
+r1_list[[3]]<-as.data.frame(r.squaredGLMM(fm3))
+
+#4
+
 fm4<-lmer(Est ~ water_level+ (1|Family),data =filter_trait_1,na.action = "na.fail")
+
 summary(fm4)
 
-fm5<-lm(Est ~ Family,data =filter_trait_1,na.action = "na.fail")
+r1_list[[4]]<-as.data.frame(r.squaredGLMM(fm4))
+
+
+#5
+
+fm5<-lmer(Est ~Size.FishBase + diet+ (1|Family),data =filter_trait_1,na.action = "na.fail")
+
 summary(fm5)
 
-fm_random<- lmer(Est ~  (1|Family),data =filter_trait_1,na.action = "na.fail")
-fm_fix<- lm(Est ~ Family,data =filter_trait_1,na.action = "na.fail")
+r1_list[[5]]<-as.data.frame(r.squaredGLMM(fm5))
+ 
+#6
+
+fm6<-lmer(Est ~Status + (1|Family),data =filter_trait_1,na.action = "na.fail")
+
+summary(fm6)
+
+r1_list[[6]]<-as.data.frame(r.squaredGLMM(fm6))
+
+#7
+
+fm7<-lmer(Est ~Size.FishBase + Status+ (1|Family),data =filter_trait_1,na.action = "na.fail")
+
+summary(fm7)
+
+r1_list[[7]]<-as.data.frame(r.squaredGLMM(fm7))
+
+#8
+
+fm8<-lmer(Est ~water_level + Status+ (1|Family),data =filter_trait_1,na.action = "na.fail")
+
+summary(fm8)
+
+r1_list[[8]]<-as.data.frame(r.squaredGLMM(fm8))
 
 
-tab_model(fm_fix,fm7,file = paste0(model_path,"//fm_fix_1.doc"))
-summary(fm_random)
-summary(fm_fix)
+#9
+
+fm9<-lmer(Est ~water_level + activity+ (1|Family),data =filter_trait_1,na.action = "na.fail")
+
+summary(fm9)
+
+r1_list[[9]]<-as.data.frame(r.squaredGLMM(fm9))
+
+#10
+
+fm10<-lmer(Est ~Size.FishBase + activity+ (1|Family),data =filter_trait_1,na.action = "na.fail")
+
+summary(fm10)
+
+r1_list[[10]]<-as.data.frame(r.squaredGLMM(fm10))
+
+
+r1_data<-bind_rows(r1_list)
+
+dredge_table<-cbind(dredge_table,r1_data)
+
+dredge_table$id<-rep("PostS1/PreS1")
+#write.csv(dredge_table,paste0(model_path,"\\traits_1_derdge_short_r.csv"))
+
+
+```
 
 
 
-ggeffects::ggpredict(fm1, terms = c("Family"), type = "re") |> plot()
-ggeffects::ggpredict(fm1, terms = c("water_level")) |> plot()
 
-fm1_model_gg = ggeffects::ggpredict(fm1,terms = c('Size.FishBase[1:80 by=5]'))
+
+
+
+```{r}
+#ggeffects::ggpredict(fm1, terms = c("Family"), type = "re") |> plot()
+#ggeffects::ggpredict(fm1, terms = c("water_level")) |> plot()
+#fm1_model_gg = ggeffects::ggpredict(fm1,terms = c('Size.FishBase[1:80 by=5]'))
 
 colnames(fm1_model_gg)<-c("Size.FishBase","Est","std.error","conf.low","conf.high","group")
 ggplot()+
@@ -381,64 +470,19 @@ ggplot()+
         strip.text.x = element_text(size = 20))
 
 
-ggsave("posts1_pres1_model.png" , width = 12, height = 5, dpi = 300,path = trait_path)
-ggsave("posts1_pres1_model.pdf" , width = 12, height = 5, dpi = 300,path = trait_path)
+#ggsave("posts1_pres1_model.png" , width = 12, height = 5, dpi = 300,path = trait_path)
+#ggsave("posts1_pres1_model.pdf" , width = 12, height = 5, dpi = 300,path = trait_path)
 ```
 
-
-
-# log ratio for 2018 vs fall 2020 (PostS2)
-                
-```{r}
-ci_data_2<-ci_data_all %>% arrange(Site,year_month,Knoll) %>% filter(year_month %in% c("2018 b","2020 b"))
-
-calc_species_se_2 = batch_calc_ES(dat = ci_data_2, grouping =  Species, condition = year_month, outcome = Abundance,scale = "count", ES = "LRRi")
-
-```
-                
-    
-```{r}
-
-log_data_2 <- all_fish %>%
-  filter(year_month %in% c("2018 b","2020 b")) %>% 
-  group_by(year_month,Family,Species) %>%
-  summarise(Abundance = sum(Abundance))
-
-log_data_2 <- spread(log_data_2,year_month,Abundance)
-
-log_data_2 <- left_join(rank_data,log_data_2)
-log_data_2 <- left_join(log_data_2,calc_species_se_2)
-
-
-log_data_2 <- log_data_2 %>%
-  rename("before" = `2018 b`,"after"= `2020 b`) 
-
-
-```
-
-
-
-
-
+### family model
 
 ```{r}
-trait_2<-left_join(log_data_2,trait_matrix)
-
-trait_2<-trait_2 %>% drop_na(16:22)
-  
-filter_trait_2<-trait_2 %>% filter(rank<101)
-
-hist(filter_trait_2$Est)
-
-m2.1<-lmer(Est ~ diet+ Size.FishBase + water_level + home_range +schooling+ rank+ (1|Family),data =filter_trait_2,na.action = "na.fail")
-
-m2.2<-lmer(Est ~ (diet+ Size.FishBase + water_level + home_range +schooling)^2+ (1|Family),data =filter_trait_2,na.action = "na.fail")
-
-dredge_table_2<-dredge(global.model = m2.1)
-#dredge_table_interactions_2 <-dredge(global.model = m2.2)
-
+fm_fix<- lm(Est ~ Family,data =filter_trait_1,na.action = "na.fail")
+summary(fm_fix)
 
 ```
+
+
 # log ratios for 2020 spring (posts1) to 2021 spring (posts3)
                                                 
          
@@ -462,9 +506,7 @@ log_data_3 <- spread(log_data_3,year_month,Abundance)
 
 log_data_3 <- left_join(rank_data,log_data_3)
 log_data_3 <- left_join(log_data_3,calc_species_se_3)
-log_data_3 <- log_data_3 %>%
-  rename("storm" = `2020 a`,"after"= `2021 a`) %>%
-  mutate(ratio = after/storm, log_ratio = log(ratio))
+log_data_3 <- log_data_3 %>% rename("storm" = `2020 a`,"after"= `2021 a`) 
 
 
 
@@ -475,6 +517,8 @@ log_data_3 <- log_data_3 %>%
 trait_3<-left_join(log_data_3,trait_matrix)
 
 trait_3<-trait_3 %>% drop_na(16:23)
+
+trait_3$Status<-as.factor(trait_3$Status)
   
 filter_trait_3<-trait_3 %>% filter(rank<101)
 
@@ -482,31 +526,120 @@ hist(filter_trait_3$Est)
 
 m3_1<-lmer(Est ~ diet+ Size.FishBase + water_level  +schooling+rank+activity+Status+ (1|Family),data =filter_trait_3,na.action = "na.fail")
 
-#m3_2<-lmer(Est ~ (diet+ Size.FishBase + water_level + home_range +schooling)^2+ (1|Family),data =filter_trait_3,na.action = "na.fail")
 
 dredge_table_3<-dredge(global.model = m3_1)
-#dredge_table_interactions_3 <-dredge(global.model = m3_2)
 
 #write.csv(dredge_table_3,paste0(model_path,"\\traits_3_derdge_raw.csv"))
-######
+
+dredge_table_3<-dredge_table_3[1:10,]
 
 
 
-
-fm3<-lmer(Est ~ water_level + (1|Family),data =filter_trait_3,na.action = "na.fail")
-summary(fm3)
-
-fm7<-lm(Est ~ Family,data =filter_trait_3,na.action = "na.fail")
-summary(fm7)
-plot(fm3)
-
-ggeffects::ggpredict(fm3, terms = c("water_level")) |> plot()
-ggeffects::ggpredict(fm3, terms = c("Family"), type ="re") |> plot()
-
+#fm3<-lmer(Est ~ water_level + (1|Family),data =filter_trait_3,na.action = "na.fail")
+#summary(fm3)
+#ggeffects::ggpredict(fm3, terms = c("water_level")) |> plot()
+#ggeffects::ggpredict(fm3, terms = c("Family"), type ="re") |> plot()
 #fm1_model_gg = ggeffects::ggpredict(fm1,terms = c('Size.FishBase[1:80 by=5]'))
 
 
 
 
+```
+
+```{r}
+
+
+rm_list<-list()
+
+#1
+
+rm1<-lmer(Est ~ water_level + (1|Family),data =filter_trait_3,na.action = "na.fail")
+summary(rm1)
+rm_list[[1]]<-as.data.frame(r.squaredGLMM(rm1))
+
+#2
+
+rm2<-lmer(Est ~  (1|Family),data =filter_trait_3,na.action = "na.fail")
+summary(rm2)
+rm_list[[2]]<-as.data.frame(r.squaredGLMM(rm2))
+
+
+#3
+
+rm3<-lmer(Est ~ Status+ (1|Family),data =filter_trait_3,na.action = "na.fail")
+summary(rm3)
+rm_list[[3]]<-as.data.frame(r.squaredGLMM(rm3))
+
+#4
+
+rm4<-lmer(Est ~ Status+ water_level+ (1|Family),data =filter_trait_3,na.action = "na.fail")
+summary(rm4)
+rm_list[[4]]<-as.data.frame(r.squaredGLMM(rm4))
+
+#5
+
+rm5<-lmer(Est ~ activity + (1|Family),data =filter_trait_3,na.action = "na.fail")
+summary(rm5)
+rm_list[[5]]<-as.data.frame(r.squaredGLMM(rm5))
+
+#6
+
+rm6<-lmer(Est ~ activity + water_level+(1|Family),data =filter_trait_3,na.action = "na.fail")
+summary(rm6)
+rm_list[[6]]<-as.data.frame(r.squaredGLMM(rm6))
+
+#7
+
+rm7<-lmer(Est ~ schooling + water_level+(1|Family),data =filter_trait_3,na.action = "na.fail")
+summary(rm7)
+rm_list[[7]]<-as.data.frame(r.squaredGLMM(rm7))
+
+#8
+
+rm8<-lmer(Est ~ schooling +activity+ water_level+(1|Family),data =filter_trait_3,na.action = "na.fail")
+summary(rm8)
+rm_list[[8]]<-as.data.frame(r.squaredGLMM(rm8))
+
+#9
+
+rm9<-lmer(Est ~ activity +Status+(1|Family),data =filter_trait_3,na.action = "na.fail")
+summary(rm9)
+rm_list[[9]]<-as.data.frame(r.squaredGLMM(rm9))
+
+#10
+
+
+rm10<-lmer(Est ~ schooling+(1|Family),data =filter_trait_3,na.action = "na.fail")
+summary(rm10)
+rm_list[[10]]<-as.data.frame(r.squaredGLMM(rm10))
+
+rm_data<-bind_rows(rm_list)
+
+
+dredge_table_3<-cbind(dredge_table_3,rm_data)
+
+
+dredge_table_3$id<-rep("PostS3/PostS1")
+```
+
+```{r}
+united_dredge<-rbind(dredge_table,dredge_table_3)
+
+#write.csv(united_dredge,paste0(model_path,"\\united_dredge.csv"))
+```
+
+
+##### Family model 
+
+```{r}
+fm_fix_recovery<-lm(Est ~ Family,data =filter_trait_3,na.action = "na.fail")
+summary(fm_fix_recovery)
+plot(fm3)
+```
+
+print table for both family models
+
+```{r}
+#tab_model(fm_fix,fm_fix_recovery,file = paste0(model_path,"//fm_fix_1.doc"))
 ```
 

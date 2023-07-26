@@ -1,0 +1,296 @@
+---
+title: "6.1 juvenile assessment"
+author: "TG"
+date: "2023-07-19"
+output: html_document
+---
+
+
+```{r message=FALSE, warning=FALSE}
+
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(stringr)
+library(Hmisc)
+library(vegan)
+library(mobr)
+library(lme4)
+library(lmerTest)
+library(MuMIn)
+library(Rarefy)
+library(rareNMtests)
+library(zetadiv)
+library(FuzzyQ)
+library(SingleCaseES)
+library(sjPlot)
+library(rfishbase)
+library(plotrix)
+
+color_op6 <- c("#20A39E","#23001E","#FFBA49","#EF5B5B")
+
+save_path<-"G:\\My Drive\\PHD\\chapter 1 strom effect\\R_storm_ms\\plots\\Fig 2\\Review\\Juveniles"
+
+```
+
+
+
+# Data prepartion
+
+```{r}
+load("fish_full_data.rdata")
+
+load("ecocamp_trait_matrix.RData")
+select <- dplyr::select
+
+juv<-read.csv("G:\\My Drive\\PHD\\chapter 1 strom effect\\R_storm_ms\\legnths_table.csv")
+```
+
+
+```{r}
+load("fish_full_data.rdata")
+select <- dplyr::select
+```
+
+## general steps:
+
+1. keep only 2018 - 2021
+
+```{r}
+
+fish_prep<-fish_full_data %>% filter(Year>2017)
+
+```
+
+
+2. remove irregular sites
+
+```{r}
+knolls_to_remove<-c("South bridge reserve","North bridge reserve","south bridge reserve",
+                    "Tamar","north bridge reserve")
+
+fish_prep<-fish_prep %>% filter(!Knoll %in% knolls_to_remove) %>% filter(Site !="North beach")
+```
+
+
+3. keep one observer from each knoll
+
+```{r}
+one_observer<-list()
+loop<-1
+set.seed(1)
+
+for (i in unique(fish_prep$survey_id)) {
+  
+  data <- fish_prep %>% filter(survey_id == i)
+  
+  obs_amount <- length(unique(data$Observer))
+  obs_name <- unique(data$Observer)
+  chosen_obs <- sample(obs_name,1)  
+ 
+  filter_data<-data %>% filter(Observer == chosen_obs)
+  one_observer[[loop]]<-filter_data
+  loop<-loop+1
+  
+  
+}
+
+fish_prep <- bind_rows(one_observer)
+
+rm(data,filter_data,one_observer)
+
+
+```
+
+4. keep only subset of knolls surveyd following the storm
+
+
+```{r}
+knolls_strom<-fish_prep %>% filter(year_month %in% c("2020 a")) %>% distinct(knoll_id)
+
+# there is 1 knoll in Princess that was sampled after the storm but not in 2018. this will remove it as well.
+
+knolls_2018<-fish_prep %>% filter(year_month %in% c("2018 b")) %>% distinct(knoll_id)
+
+
+fish_prep<-fish_prep %>% filter(knoll_id %in% knolls_strom$knoll_id)
+fish_prep<-fish_prep %>% filter(knoll_id %in% knolls_2018$knoll_id)
+
+
+# make sure i have the right knolls number
+
+knoll_site_year <-fish_prep %>% group_by(Site,year_month) %>% summarise("knoll_number"= n_distinct(knoll_id))
+
+```
+
+
+5. convert year_month to factor
+
+```{r}
+
+fish_prep$year_month<-as.factor(fish_prep$year_month)
+
+fish_prep<- fish_prep %>% filter(Confidence < 1)
+```
+
+
+
+```{r}
+Data<- fish_prep[,c(1:16,28)]
+
+max_size<-fish_full_data %>%
+  filter(Year>2017) %>% 
+  filter(Confidence<1) %>%
+  group_by(Species) %>% 
+  summarise(max_size = max(Length),
+            quantile_85 = round(quantile(Length, probs = 0.85),0))
+
+data_juv_size<- max_size %>% mutate("juvenile_size" = round(quantile_85/3,0)) %>% select(Species,juvenile_size,quantile_85)
+
+```
+
+
+
+```{r}
+
+Data<-left_join(Data,data_juv_size)
+
+Data$juv<-ifelse(Data$Length < Data$juvenile_size,"Juvenile","Adult")
+
+juvenile<-Data %>% filter(juv == "Juvenile")
+
+adults<-Data %>%  filter(juv =="Adult")
+
+a<-sum(adults$Abundance)
+
+j<-sum(juvenile$Abundance)
+
+p<-(j*100)/(j+a)
+
+p<- round(p,0)
+
+print(paste0("Juvenile precent is ",p,"%"))
+
+```
+
+### abundance of all juv
+
+```{r}
+
+abundance_all_juv <- juvenile %>%
+  group_by(survey_id,Site,Knoll,year_month,
+           Surface_Area) %>%
+    summarise("ind"=sum(Abundance))
+
+
+empty_knolls<-Data %>% select(survey_id,Site,Knoll,year_month,Surface_Area) %>% distinct(.keep_all = T)
+
+all_knoll<- left_join(empty_knolls,abundance_all_juv)
+
+all_knoll$ind[is.na(all_knoll$ind)]<-0
+
+```
+
+
+
+```{r}
+j_ind_per_m<- all_knoll %>%  group_by(Site,year_month,Knoll,Surface_Area) %>% summarise("inds"=sum(ind)) %>% mutate("inds_m"=inds/Surface_Area)
+
+
+j_ind_per_m <- j_ind_per_m %>%
+  group_by(year_month) %>%
+  summarise("mean_density"=mean(inds_m),"se"= std.error(inds_m),
+            "n"=n())
+
+
+ggplot(data = j_ind_per_m,aes(x=year_month,y=mean_density,fill = year_month))+
+geom_bar(stat="identity")+geom_errorbar(aes(ymin=mean_density-se,ymax=mean_density+se),width =0.1)+
+  geom_text(aes(label = n,y=0.1), size = 7,color= "white")+  
+  xlab("Year")+ 
+  ylab(bquote('Mean juveniles density '(Individuals/m^2)))+
+  theme_classic()+
+    theme(axis.text.x = element_text(size=20),
+        plot.title = element_text(size=24),
+        axis.text.y = element_text(size =20),
+        axis.title.x = element_text(size=22),
+        axis.title.y = element_text(size=22),
+        legend.title = element_text(size=22),
+        legend.text = element_text(size=20),
+        legend.position = "none",
+        strip.text.x = element_text(size = 20))+
+  scale_fill_manual(values= color_op6,
+                           name = "Year",
+                           labels = c("Fall 2018","Spring 2020",
+                                      "Fall 2020" ,
+                                      "Spring 2021"))+
+  scale_x_discrete(labels = c("Fall 2018","Spring 2020",
+                                      "Fall 2020" ,
+                                      "Spring 2021"))
+
+
+#ggsave("abundance_bar_Juvenile.png" , width = 7, height = 7, dpi = 300,path = save_path)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### all this is redundent...no more species then the table Mai sent me... 
+
+
+```{r}
+size<-trait_matrix %>% select(Species,Size.FishBase) %>% drop_na()
+```
+
+
+```{r}
+
+
+
+sp_juv<-Data %>% distinct(Species)
+
+sp_juv<- left_join(sp_juv,juv)
+
+sp_juv<-left_join(sp_juv,size)
+
+sp_juv<-sp_juv %>% mutate(juv_fishbase = Size.FishBase/3)
+
+
+sp_juv$juv_size<-coalesce(sp_juv$max_juv_lengths,sp_juv$juv_fishbase)
+
+sp_juv<-left_join(sp_juv,data_juv_size)
+
+juv_size<-sp_juv %>% select(Species,juv_size) %>% drop_na()
+
+
+
+
+
+l_max<-rfishbase::popchar(sp_juv$Species,fields = c("Species","Lmax"))
+
+
+sp_juv<-left_join(sp_juv,l_max)
+
+
+sp_juv<-as.data.frame(sp_juv)
+
+sp_juv<-sp_juv %>% group_by(Species) %>% dplyr::summarise(mean_lmax = mean(Lmax))
+
+sp_juv<-sp_juv %>% mutate("juv_fishbase" = mean_lmax/3)
+
+sp_juv<-left_join(sp_juv,juv)
+
+```
+
